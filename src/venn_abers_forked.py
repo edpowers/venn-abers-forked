@@ -1081,7 +1081,39 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         # Delegate prediction to the VennAbersCalibrator instance
         return self.model_instance.predict(model_input)
 
+    def predict_proba(self, context, model_input):
+        # Delegate prediction to the VennAbersCalibrator instance
+        return self.model_instance.predict_proba(model_input)
+
     def __getattr__(self, name):
-        # Delegate any calls to methods/attributes not defined in
-        # the wrapper to the VennAbersCalibrator instance
+        if name == "model_instance":
+            if hasattr(self, '_initializing') and self._initializing:
+                raise RuntimeError("Failed to initialize model_instance during __getattr__ call")
+
+            self._initializing = True
+            self.model_instance = VennAbersCalibrator()  # Replace with your initialization logic
+            del self._initializing
+
+            return self.model_instance
+
+        if self.model_instance is None:
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute 'model_instance'")
+
         return getattr(self.model_instance, name)
+
+    def __getstate__(self):
+        # This method is called when the object is being pickled.
+        # You can choose which attributes to serialize.
+        # In this case, we'll serialize all of them.
+        return self.__dict__
+
+    def __setstate__(self, state):
+        # This method is called when the object is being unpickled.
+        # You can choose how to set the attributes.
+        # In this case, we'll just set them directly from the state.
+        self.__dict__.update(state)
+
+        # If model_instance is not set, initialize it
+        if self.model_instance is None:
+            self.model_instance = VennAbersCalibrator(**state["model_instance"])
+            # Replace with your initialization logic

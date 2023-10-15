@@ -12,6 +12,9 @@ This library contains the Python implementation of Venn-ABERS calibration for bi
 Edge Cases:
 - Can't use the cat_features parameter in CatBoostClassifier, as the model
     cloning process for Sklearn compatibility gets confused.
+- Once the model has been logged to MLFlow, do not attempt to modify its
+    state, or even try to get its parameters, without first loading it from
+    MLFlow/local env.
 
 ### Installation
 ```commandline
