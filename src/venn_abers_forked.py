@@ -855,21 +855,30 @@ class VennAbersCalibrator:
         Please find the underlying parameters passed, and use
         those.
         """
+        f_to_save = Path(os.path.join(path, "model.bin"))
+        if not f_to_save.exists():
+            f_to_save.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            f_to_save.touch(exist_ok=True, mode=0o755)
+
+
         if hasattr(self.estimator, "save") and callable(self.estimator.save):
+
             self.estimator.save(os.path.join(path, "model.bin"), **kwargs)
 
             # Save metadata
-            with open(os.path.join(path, "metadata.json"), "w") as meta_file:
+            with open(os.path.join(path, "metadata.json"), "x") as meta_file:
                 json.dump({"estimator_type": type(self.estimator).__name__}, meta_file)
 
             # Validate that the path exists
             if not os.path.exists(path):
                 raise ValueError(f"Path {path} does not exist.")
-        elif hasattr(self.estimator, "save_model") and callable(self.estimator.save_model):
+        elif hasattr(self.estimator, "save_model") and callable(
+            self.estimator.save_model
+        ):
             self.estimator.save_model(os.path.join(path, "model.bin"), **kwargs)
 
             # Save metadata
-            with open(os.path.join(path, "metadata.json"), "w") as meta_file:
+            with open(os.path.join(path, "metadata.json"), "x") as meta_file:
                 json.dump({"estimator_type": type(self.estimator).__name__}, meta_file)
 
             # Validate that the path exists
@@ -879,7 +888,6 @@ class VennAbersCalibrator:
             raise NotImplementedError(
                 "The underlying estimator does not implement save functionality."
             )
-
 
     @classmethod
     def load_model(cls, path: Union[Path, str]):
@@ -1077,6 +1085,15 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         # Load any necessary context here (not required for basic use cases)
         pass
 
+    @classmethod
+    def load_model(cls, model_path):
+        # Initialize the VennAbersCalibrator and load the model from the path
+        calibrator = VennAbersCalibrator()
+        model_instance = calibrator.load_model(model_path)
+
+        # Return an initialized instance of VennAbersCalibratedWrapper
+        return cls(model_instance=model_instance)
+
     def predict(self, context, model_input):
         # Delegate prediction to the VennAbersCalibrator instance
         return self.model_instance.predict(model_input)
@@ -1087,17 +1104,23 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
 
     def __getattr__(self, name):
         if name == "model_instance":
-            if hasattr(self, '_initializing') and self._initializing:
-                raise RuntimeError("Failed to initialize model_instance during __getattr__ call")
+            if hasattr(self, "_initializing") and self._initializing:
+                raise RuntimeError(
+                    "Failed to initialize model_instance during __getattr__ call"
+                )
 
             self._initializing = True
-            self.model_instance = VennAbersCalibrator()  # Replace with your initialization logic
+            self.model_instance = (
+                VennAbersCalibrator()
+            )  # Replace with your initialization logic
             del self._initializing
 
             return self.model_instance
 
         if self.model_instance is None:
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute 'model_instance'")
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute 'model_instance'"
+            )
 
         return getattr(self.model_instance, name)
 
@@ -1117,3 +1140,18 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         if self.model_instance is None:
             self.model_instance = VennAbersCalibrator(**state["model_instance"])
             # Replace with your initialization logic
+
+    def return_feature_names(self) -> np.ndarray:
+        """Return the feature names."""
+        features_names = []
+
+        if hasattr(self, "feature_names_"):
+            features_names = self.feature_names_
+
+        elif hasattr(self, "get_feature_names"):
+            features_names = self.get_feature_names()
+
+        elif hasattr(self, "feat_names"):
+            features_names = self.feat_names
+
+        return features_names
