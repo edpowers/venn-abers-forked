@@ -3,9 +3,19 @@
 # Venn-ABERS calibration
 This library contains the Python implementation of Venn-ABERS calibration for binary and multiclass classification problems.
 
+## Updates:
+- Added Sklearn train_test_split compatibility, for temporal CV support.
+- Added estimator save/load for integration to custom pipelines.
+    - Can add estimators as needed to the ESTIMATOR_MAP.
+- Added wrapper for MLFlow.
+
+Edge Cases:
+- Can't use the cat_features parameter in CatBoostClassifier, as the model
+    cloning process for Sklearn compatibility gets confused.
+
 ### Installation
 ```commandline
-pip install venn-abers
+pip install -e .
 ```
 The method can be applied on top of an underlying scikit-learn algorithm.
 ### Example Usage
