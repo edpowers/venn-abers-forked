@@ -1,7 +1,8 @@
-from typing import Union
+from typing import Any, Union
 import json
 from pathlib import Path
 import os
+import pickle
 
 import mlflow
 import numpy as np
@@ -10,6 +11,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.multiclass import OneVsOneClassifier
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
+from torch import Value
 
 np.seterr(divide="ignore", invalid="ignore")
 
@@ -828,6 +830,22 @@ class VennAbersCalibrator:
         self.time_series_split = time_series_split
         self.feature_names = feature_names
 
+    @property
+    def feature_names_(self):
+        return self.estimator.feature_names_
+
+    @property
+    def _get_cat_feature_indices(self):
+        return self.estimator._get_cat_feature_indices
+
+    @property
+    def _get_float_feature_indices(self):
+        return self.estimator._get_float_feature_indices
+
+    @property
+    def _get_text_feature_indices(self):
+        return self.estimator._get_text_feature_indices
+
     def get_feature_importance(self, *args, **kwargs) -> np.ndarray:
         """Get feature importance from the underlying estimator.
 
@@ -849,45 +867,67 @@ class VennAbersCalibrator:
         """Alias for save."""
         self.save(path=path, **kwargs)
 
-    def save(self, path: Union[str, Path], **kwargs) -> None:
-        """Implement save functionality.
+    def validate_path(self, path: str) -> None:
+        """Validate that the path exists."""
+        if not os.path.exists(path):
+            raise ValueError(f"Path {path} does not exist.")
 
-        Please find the underlying parameters passed, and use
-        those.
-        """
+    def save_estimator(self, estimator, path: str, **kwargs) -> None:
+        """Save the estimator."""
+        if hasattr(estimator, "save") and callable(estimator.save):
+            estimator.save(path, **kwargs)
+        elif hasattr(estimator, "save_model") and callable(estimator.save_model):
+            estimator.save_model(path, **kwargs)
+        else:
+            raise NotImplementedError(
+                "The underlying estimator does not implement save functionality."
+            )
+
+    def save_metadata(self, path: str):
+        """Save the metadata for the model."""
+        metadata = {
+            "estimator_type": type(self.estimator).__name__,
+            "inductive": self.inductive,
+            "n_splits": self.n_splits,
+            "cal_size": self.cal_size,
+            "train_proper_size": self.train_proper_size,
+            "random_state": self.random_state,
+            "shuffle": self.shuffle,
+            "stratify": self.stratify,
+            "precision": self.precision,
+            "time_series_split": self.time_series_split,
+            "classes": self.classes.tolist(),
+            # Add other non-None attributes here...
+        }
+        with open(os.path.join(path, "metadata.json"), "w") as meta_file:
+            json.dump(metadata, meta_file)
+
+    def save(self, path: Union[str, Path], **kwargs) -> None:
+        """Implement save functionality."""
         f_to_save = Path(os.path.join(path, "model.bin"))
         if not f_to_save.exists():
             f_to_save.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
             f_to_save.touch(exist_ok=True, mode=0o755)
 
-
-        if hasattr(self.estimator, "save") and callable(self.estimator.save):
-
-            self.estimator.save(os.path.join(path, "model.bin"), **kwargs)
-
-            # Save metadata
-            with open(os.path.join(path, "metadata.json"), "x") as meta_file:
-                json.dump({"estimator_type": type(self.estimator).__name__}, meta_file)
-
-            # Validate that the path exists
-            if not os.path.exists(path):
-                raise ValueError(f"Path {path} does not exist.")
-        elif hasattr(self.estimator, "save_model") and callable(
-            self.estimator.save_model
-        ):
-            self.estimator.save_model(os.path.join(path, "model.bin"), **kwargs)
-
-            # Save metadata
-            with open(os.path.join(path, "metadata.json"), "x") as meta_file:
-                json.dump({"estimator_type": type(self.estimator).__name__}, meta_file)
-
-            # Validate that the path exists
-            if not os.path.exists(path):
-                raise ValueError(f"Path {path} does not exist.")
+        # For VennAbersCalibratedWrapper
+        if isinstance(self.estimator, VennAbersCalibratedWrapper):
+            print(f"Saving {self.estimator.estimator.__class__.__name__} model")
+            model_instance = self.estimator.get_model_instance()
+            model_instance.save_model(f_to_save, **kwargs)
+        # For other types of estimators
         else:
-            raise NotImplementedError(
-                "The underlying estimator does not implement save functionality."
-            )
+            self.save_estimator(self.estimator, os.path.join(path, "model.bin"), **kwargs)
+
+        # Call the function to save metadata
+        self.save_metadata(path)
+        self.save_va_calibrator(path)
+        self.validate_path(path)
+
+    def save_va_calibrator(self, path: str):
+        """Save the Venn-ABERS calibrator."""
+        # Pickle va_calibrator to a separate file
+        with open(os.path.join(path, 'va_calibrator.pkl'), 'wb') as f:
+            pickle.dump(self.va_calibrator, f)
 
     @classmethod
     def load_model(cls, path: Union[Path, str]):
@@ -908,7 +948,41 @@ class VennAbersCalibrator:
         estimator = estimator_type()
         estimator.load_model(os.path.join(path, "model.bin"))
 
-        return cls(estimator=estimator)
+        # Unpickle va_calibrator
+        with open(os.path.join(path, 'va_calibrator.pkl'), 'rb') as f:
+            va_calibrator = pickle.load(f)
+
+        instance = cls(
+            estimator=estimator,
+            inductive=metadata.get("inductive"),
+            n_splits=metadata.get("n_splits"),
+            cal_size=metadata.get("cal_size"),
+            train_proper_size=metadata.get("train_proper_size"),
+            random_state=metadata.get("random_state"),
+            shuffle=metadata.get("shuffle"),
+            stratify=metadata.get("stratify"),
+            precision=metadata.get("precision"),
+            time_series_split=metadata.get("time_series_split"),
+            max_train_size=metadata.get("max_train_size"),
+            test_size=metadata.get("test_size"),
+            # Do not load feature_names as you've mentioned
+        )
+
+        instance.va_calibrator = va_calibrator
+        instance.classes = np.ndarray(metadata.get("classes"))
+        # You can add a validation step here, for example:
+        if not instance.time_series_split:
+            raise ValueError(
+                "This model was trained with time_series_split=True."
+            )
+
+        if not instance.va_calibrator:
+            raise ValueError(
+                "This model was trained with va_calibrator, which \n"
+                "seems to have been lost during saving."
+            )
+
+        return instance
 
     def fit(self, _x_train, _y_train):
         """Fits the Venn-ABERS calibrator to the training set when underlying sci-kit learn classifier is provided
@@ -1076,8 +1150,56 @@ class VennAbersCalibrator:
             y_pred = np.array([self.classes[i] for i in idx])
         return y_pred
 
+    def _save(self, path: Union[str, Path], **kwargs) -> None:
+        """Implement save functionality.
+
+        Please find the underlying parameters passed, and use
+        those.
+        """
+        f_to_save = Path(os.path.join(path, "model.bin"))
+        if not f_to_save.exists():
+            f_to_save.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            f_to_save.touch(exist_ok=True, mode=0o755)
+
+        if isinstance(self.estimator, VennAbersCalibratedWrapper):
+
+            print(f"Saving {self.estimator.estimator.__class__.__name__} model")
+            model_instance = self.estimator.get_model_instance()
+            # Assuming 'get_original_model' is your unwrap method
+            model_instance.save_model(f_to_save, **kwargs)
+
+        elif hasattr(self.estimator, "save") and callable(self.estimator.save):
+
+            self.estimator.save(os.path.join(path, "model.bin"), **kwargs)
+
+            # Save metadata
+            with open(os.path.join(path, "metadata.json"), "x") as meta_file:
+                json.dump({"estimator_type": type(self.estimator).__name__}, meta_file)
+
+            # Validate that the path exists
+            if not os.path.exists(path):
+                raise ValueError(f"Path {path} does not exist.")
+        elif hasattr(self.estimator, "save_model") and callable(
+            self.estimator.save_model
+        ):
+            self.estimator.save_model(os.path.join(path, "model.bin"), **kwargs)
+
+            # Save metadata
+            with open(os.path.join(path, "metadata.json"), "x") as meta_file:
+                json.dump({"estimator_type": type(self.estimator).__name__}, meta_file)
+
+            # Validate that the path exists
+            if not os.path.exists(path):
+                raise ValueError(f"Path {path} does not exist.")
+        else:
+            raise NotImplementedError(
+                "The underlying estimator does not implement save functionality."
+            )
+
 
 class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
+    """This is purely to satisfy MLFlow's requirements."""
+
     def __init__(self, model_instance):
         self.model_instance = model_instance
 
@@ -1085,29 +1207,53 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         # Load any necessary context here (not required for basic use cases)
         pass
 
+    def get_original_model(self):
+        return self.estimator
+
+    def get_model_instance(self):
+        return self.model_instance
+
     @classmethod
     def load_model(cls, model_path):
         # Initialize the VennAbersCalibrator and load the model from the path
-        calibrator = VennAbersCalibrator()
-        model_instance = calibrator.load_model(model_path)
+        model_instance = VennAbersCalibrator.load_model(model_path)
 
+        if not model_instance.time_series_split:
+            raise ValueError(
+                "This model was trained with time_series_split=True. "
+            )
         # Return an initialized instance of VennAbersCalibratedWrapper
         return cls(model_instance=model_instance)
 
-    def predict(self, context, model_input):
-        # Delegate prediction to the VennAbersCalibrator instance
-        return self.model_instance.predict(model_input)
+    def save_model(self, path: str, **kwargs) -> None:
+        """Custom save method for VennAbersCalibratedWrapper."""
+        if hasattr(self.model_instance, "save"):
+            # If the model_instance has a save method, use it.
+            self.model_instance.save(path, **kwargs)
+        elif isinstance(self.model_instance, mlflow.pyfunc.PythonModel):
+            # If it's a pyfunc.PythonModel, serialize it.
+            with open(os.path.join(path, "model.pkl"), "wb") as f:
+                pickle.dump(self.model_instance, f)
+        else:
+            raise NotImplementedError("This type of model cannot be saved.")
 
-    def predict_proba(self, context, model_input):
-        # Delegate prediction to the VennAbersCalibrator instance
-        return self.model_instance.predict_proba(model_input)
+    # def predict(self, context, model_input):
+    #    # Delegate prediction to the VennAbersCalibrator instance
+    #    return self.model_instance.predict(model_input)
+    # def predict_proba(self, context, model_input):
+    #    # Delegate prediction to the VennAbersCalibrator instance
+    #    return self.model_instance.predict_proba(model_input)
 
     def __getattr__(self, name):
+        print(f"__getattr__ called with name: {name}")
+
         if name == "model_instance":
             if hasattr(self, "_initializing") and self._initializing:
                 raise RuntimeError(
                     "Failed to initialize model_instance during __getattr__ call"
                 )
+
+            print("Initializing model_instance of VennAbersCalibrator with no params")
 
             self._initializing = True
             self.model_instance = (
@@ -1125,12 +1271,15 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         return getattr(self.model_instance, name)
 
     def __getstate__(self):
+        print("Serializing the object state.")
         # This method is called when the object is being pickled.
         # You can choose which attributes to serialize.
         # In this case, we'll serialize all of them.
         return self.__dict__
 
     def __setstate__(self, state):
+
+        print(f"Serializing the object {state=}.")
         # This method is called when the object is being unpickled.
         # You can choose how to set the attributes.
         # In this case, we'll just set them directly from the state.
@@ -1140,18 +1289,3 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         if self.model_instance is None:
             self.model_instance = VennAbersCalibrator(**state["model_instance"])
             # Replace with your initialization logic
-
-    def return_feature_names(self) -> np.ndarray:
-        """Return the feature names."""
-        features_names = []
-
-        if hasattr(self, "feature_names_"):
-            features_names = self.feature_names_
-
-        elif hasattr(self, "get_feature_names"):
-            features_names = self.get_feature_names()
-
-        elif hasattr(self, "feat_names"):
-            features_names = self.feat_names
-
-        return features_names
