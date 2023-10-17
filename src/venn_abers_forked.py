@@ -1,4 +1,4 @@
-from typing import Any, Union
+from typing import Union
 import json
 from pathlib import Path
 import os
@@ -8,10 +8,10 @@ import mlflow
 import numpy as np
 import catboost as cb
 from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.multiclass import OneVsOneClassifier
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
-from torch import Value
 
 np.seterr(divide="ignore", invalid="ignore")
 
@@ -374,7 +374,7 @@ class VennAbersCV:
         self.time_series_split = time_series_split
         self.feature_names = feature_names
 
-    def fit(self, _x_train, _y_train):
+    def fit(self, _x_train: np.ndarray, _y_train: np.ndarray):
         """Fits the IVAP or CVAP calibrator to the training set.
 
         Parameters
@@ -385,7 +385,23 @@ class VennAbersCV:
         _y_train : {array-like}, shape (n_samples,)
             Associated binary class labels.
         """
-        if self.inductive:
+        if self.time_series_split:
+
+            ts = TimeSeriesSplit(
+                n_splits=int(self.n_splits),
+                test_size=int(max(self.cal_size, len(_x_train) * .025)),
+                gap=15,
+            )
+
+            for train_index, test_index in ts.split(_x_train):
+                self.estimator.fit(
+                    _x_train.iloc[train_index], _y_train[train_index].flatten()
+                )
+                clf_prob = self.estimator.predict_proba(_x_train.iloc[test_index])
+                self.clf_p_cal.append(clf_prob)
+                self.clf_y_cal.append(_y_train[test_index])
+
+        elif self.inductive:
             self.n_splits = 1
             try:
                 check_is_fitted(self.estimator)
@@ -404,20 +420,6 @@ class VennAbersCV:
             clf_prob = self.estimator.predict_proba(x_cal)
             self.clf_p_cal.append(clf_prob)
             self.clf_y_cal.append(y_cal)
-        elif self.time_series_split:
-            ts = TimeSeriesSplit(
-                n_splits=self.n_splits,
-                max_train_size=self.max_train_size,
-                test_size=self.test_size,
-            )
-
-            for train_index, test_index in ts.split(_x_train):
-                self.estimator.fit(
-                    _x_train[train_index], _y_train[train_index].flatten()
-                )
-                clf_prob = self.estimator.predict_proba(_x_train[test_index])
-                self.clf_p_cal.append(clf_prob)
-                self.clf_y_cal.append(_y_train[test_index])
 
         else:
             kf = StratifiedKFold(
