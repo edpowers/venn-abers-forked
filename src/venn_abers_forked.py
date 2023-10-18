@@ -12,6 +12,8 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.multiclass import OneVsOneClassifier
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
+from sktime.split import SlidingWindowSplitter
+from sktime.forecasting.base import ForecastingHorizon
 
 np.seterr(divide="ignore", invalid="ignore")
 
@@ -387,13 +389,30 @@ class VennAbersCV:
         """
         if self.time_series_split:
 
-            ts = TimeSeriesSplit(
-                n_splits=int(self.n_splits),
-                test_size=int(max(self.cal_size, len(_x_train) * .025)),
-                gap=15,
+            # ts = TimeSeriesSplit(
+            #    n_splits=int(self.n_splits),
+            #    test_size=int(max(self.cal_size, len(_x_train) * .025)),
+            #    gap=15,
+            # )
+
+            kwargs = {}
+
+            # Initialize sliding window splitter
+            splitter = SlidingWindowSplitter(
+                fh=ForecastingHorizon(
+                    list(
+                        range(
+                            kwargs.get("cv_forecast_gap", 50),
+                            kwargs.get("cv_forecast_range", 150),
+                        )
+                    ),
+                    is_relative=True,),
+                window_length=250,
+                step_length=50,
+                initial_window=500
             )
 
-            for train_index, test_index in ts.split(_x_train):
+            for train_index, test_index in splitter.split(_x_train):
                 self.estimator.fit(
                     _x_train.iloc[train_index], _y_train[train_index].flatten()
                 )
