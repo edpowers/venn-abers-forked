@@ -407,9 +407,9 @@ class VennAbersCV:
                         )
                     ),
                     is_relative=True,),
-                window_length=250,
-                step_length=50,
-                initial_window=500
+                window_length=500,
+                step_length=100,
+                initial_window=750
             )
 
             for train_index, test_index in splitter.split(_x_train):
