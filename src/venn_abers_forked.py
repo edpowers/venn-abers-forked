@@ -4,15 +4,29 @@ from pathlib import Path
 import os
 import pickle
 
+import subprocess
+
 import mlflow
 import numpy as np
 import catboost as cb
+import lightgbm as lgb
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.multiclass import OneVsOneClassifier
 from sklearn.utils.validation import check_is_fitted
 from sklearn.exceptions import NotFittedError
-from sktime.split import SlidingWindowSplitter
+
+try:
+    from sktime.split import SlidingWindowSplitter
+except ModuleNotFoundError:
+    command = ["pip", "install", "--upgrade", "sktime"]
+
+    # Execute the command
+    result = subprocess.run(
+        command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    from sktime.split import SlidingWindowSplitter
+
 from sktime.forecasting.base import ForecastingHorizon
 
 np.seterr(divide="ignore", invalid="ignore")
@@ -20,6 +34,8 @@ np.seterr(divide="ignore", invalid="ignore")
 ESTIMATOR_MAP = {
     "CatBoostClassifier": cb.CatBoostClassifier,
     "CatBoostRegressor": cb.CatBoostRegressor,
+    "LGBMClassifier": lgb.LGBMClassifier,
+    "LGBMRegressor": lgb.LGBMRegressor,
 }
 
 
@@ -388,7 +404,6 @@ class VennAbersCV:
             Associated binary class labels.
         """
         if self.time_series_split:
-
             # ts = TimeSeriesSplit(
             #    n_splits=int(self.n_splits),
             #    test_size=int(max(self.cal_size, len(_x_train) * .025)),
@@ -406,10 +421,11 @@ class VennAbersCV:
                             kwargs.get("cv_forecast_range", 150),
                         )
                     ),
-                    is_relative=True,),
+                    is_relative=True,
+                ),
                 window_length=500,
                 step_length=100,
-                initial_window=750
+                initial_window=750,
             )
 
             for train_index, test_index in splitter.split(_x_train):
@@ -899,9 +915,18 @@ class VennAbersCalibrator:
             estimator.save(path, **kwargs)
         elif hasattr(estimator, "save_model") and callable(estimator.save_model):
             estimator.save_model(path, **kwargs)
+        elif hasattr(estimator, "_Booster") and hasattr(
+            estimator._Booster, "save_model"
+        ):
+            # and callable(
+            # estimator._Booster.save_model
+            # ):
+            estimator._Booster.save_model(path)
         else:
             raise NotImplementedError(
-                "The underlying estimator does not implement save functionality."
+                "The underlying estimator does not implement save functionality. \n"
+                f"{type(estimator)=} \n"
+                f"{estimator.__dict__.keys()=}"
             )
 
     def save_metadata(self, path: str):
@@ -937,7 +962,9 @@ class VennAbersCalibrator:
             model_instance.save_model(f_to_save, **kwargs)
         # For other types of estimators
         else:
-            self.save_estimator(self.estimator, os.path.join(path, "model.bin"), **kwargs)
+            self.save_estimator(
+                self.estimator, os.path.join(path, "model.bin"), **kwargs
+            )
 
         # Call the function to save metadata
         self.save_metadata(path)
@@ -947,7 +974,7 @@ class VennAbersCalibrator:
     def save_va_calibrator(self, path: str):
         """Save the Venn-ABERS calibrator."""
         # Pickle va_calibrator to a separate file
-        with open(os.path.join(path, 'va_calibrator.pkl'), 'wb') as f:
+        with open(os.path.join(path, "va_calibrator.pkl"), "wb") as f:
             pickle.dump(self.va_calibrator, f)
 
     @classmethod
@@ -967,10 +994,19 @@ class VennAbersCalibrator:
 
         # Instantiate estimator
         estimator = estimator_type()
-        estimator.load_model(os.path.join(path, "model.bin"))
+
+        if not estimator:
+            raise ValueError(f"Could not instantiate estimator: {estimator_type}")
+
+        f_model_path = os.path.join(path, "model.bin")
+
+        if hasattr(estimator, "_Booster"):
+            estimator = lgb.Booster(model_file=f_model_path)
+        else:
+            estimator.load_model(f_model_path)
 
         # Unpickle va_calibrator
-        with open(os.path.join(path, 'va_calibrator.pkl'), 'rb') as f:
+        with open(os.path.join(path, "va_calibrator.pkl"), "rb") as f:
             va_calibrator = pickle.load(f)
 
         instance = cls(
@@ -993,9 +1029,7 @@ class VennAbersCalibrator:
         instance.classes = np.ndarray(metadata.get("classes"))
         # You can add a validation step here, for example:
         if not instance.time_series_split:
-            raise ValueError(
-                "This model was trained with time_series_split=True."
-            )
+            raise ValueError("This model was trained with time_series_split=True.")
 
         if not instance.va_calibrator:
             raise ValueError(
@@ -1183,14 +1217,12 @@ class VennAbersCalibrator:
             f_to_save.touch(exist_ok=True, mode=0o755)
 
         if isinstance(self.estimator, VennAbersCalibratedWrapper):
-
             print(f"Saving {self.estimator.estimator.__class__.__name__} model")
             model_instance = self.estimator.get_model_instance()
             # Assuming 'get_original_model' is your unwrap method
             model_instance.save_model(f_to_save, **kwargs)
 
         elif hasattr(self.estimator, "save") and callable(self.estimator.save):
-
             self.estimator.save(os.path.join(path, "model.bin"), **kwargs)
 
             # Save metadata
@@ -1240,9 +1272,7 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         model_instance = VennAbersCalibrator.load_model(model_path)
 
         if not model_instance.time_series_split:
-            raise ValueError(
-                "This model was trained with time_series_split=True. "
-            )
+            raise ValueError("This model was trained with time_series_split=True. ")
         # Return an initialized instance of VennAbersCalibratedWrapper
         return cls(model_instance=model_instance)
 
@@ -1299,7 +1329,6 @@ class VennAbersCalibratedWrapper(mlflow.pyfunc.PythonModel):
         return self.__dict__
 
     def __setstate__(self, state):
-
         print(f"Serializing the object {state=}.")
         # This method is called when the object is being unpickled.
         # You can choose how to set the attributes.

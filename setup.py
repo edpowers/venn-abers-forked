@@ -22,7 +22,7 @@ setup(
           'scikit-learn',
           "catboost",
           "mlflow",
-          "sktime"
+          "sktime",
       ],
   classifiers=[
     'Development Status :: 3 - Alpha',
