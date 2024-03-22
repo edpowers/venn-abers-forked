@@ -35,7 +35,7 @@ ESTIMATOR_MAP = {
     "CatBoostClassifier": cb.CatBoostClassifier,
     "CatBoostRegressor": cb.CatBoostRegressor,
     "LGBMClassifier": lgb.LGBMClassifier,
-    "LGBMRegressor": lgb.LGBMRegressor,
+    "Booster": lgb.LGBMClassifier,
 }
 
 
@@ -1008,11 +1008,17 @@ class VennAbersCalibrator:
 
         estimator_type = ESTIMATOR_MAP.get(metadata["estimator_type"])
 
-        if not estimator_type:
-            raise ValueError(f"Unknown estimator type: {metadata['estimator_type']}")
-
-        # Instantiate estimator
-        estimator = estimator_type()
+        if isinstance(
+            estimator_type, (lgb.Booster, lgb.basic.Booster, lgb.LGBMClassifier)
+        ):
+            estimator = lgb.LGBMClassifier()
+        elif not estimator_type:
+            raise ValueError(
+                f"Unknown estimator type: {metadata['estimator_type']} {estimator_type=}"
+            )
+        else:
+            # Instantiate estimator
+            estimator = estimator_type()
 
         if not estimator:
             raise ValueError(f"Could not instantiate estimator: {estimator_type}")
