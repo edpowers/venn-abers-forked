@@ -869,19 +869,38 @@ class VennAbersCalibrator:
 
     @property
     def feature_names_(self):
-        return self.estimator.feature_names_
+        if hasattr(self.estimator, "feature_names_"):
+            return self.estimator.feature_names_
+        elif hasattr(self.estimator, "feature_names"):
+            return self.estimator.feature_names
+        elif hasattr(self, "feature_names"):
+            return self.feature_names
+        else:
+            raise AttributeError(
+                "The underlying estimator does not have the attribute "
+                "'feature_names' or 'feature_names_'."
+            )
 
     @property
     def _get_cat_feature_indices(self):
-        return self.estimator._get_cat_feature_indices
+        if hasattr(self, "estimator._get_cat_feature_instances"):
+            return self.estimator._get_cat_feature_indices
+
+        return lambda *args, **kwargs: None
 
     @property
     def _get_float_feature_indices(self):
-        return self.estimator._get_float_feature_indices
+        if hasattr(self, "estimator._get_float_feature_instances"):
+            return self.estimator._get_float_feature_indices
+
+        return lambda *args, **kwargs: None
 
     @property
     def _get_text_feature_indices(self):
-        return self.estimator._get_text_feature_indices
+        if hasattr(self, "estimator._get_text_feature_instances"):
+            return self.estimator._get_text_feature_indices
+
+        return lambda *args, **kwargs: None
 
     def get_feature_importance(self, *args, **kwargs) -> np.ndarray:
         """Get feature importance from the underlying estimator.
