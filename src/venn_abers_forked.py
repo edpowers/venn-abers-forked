@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Any
 import json
 from pathlib import Path
 import os
@@ -39,7 +39,13 @@ ESTIMATOR_MAP = {
 }
 
 
-def calc_p0p1(p_cal, y_cal, precision=None):
+def calc_p0p1(
+    p_cal: np.ndarray, y_cal: np.ndarray, precision: float = None
+) -> tuple[
+    np.ndarray[Any, [float]],
+    np.ndarray[Any, [float]],
+    Any,
+]:
     """Function that calculates isotonic calibration vectors required for Venn-ABERS calibration
 
     This function relies on the geometric representation of isotonic
@@ -521,6 +527,7 @@ class VennAbersCV:
                 )
             )
             p_prime[:, 0] = 1 - p_prime[:, 1]
+
         return p_prime
 
 

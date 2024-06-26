@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "venn-abers-forked"
+version = "1.3.1"
+description = "Venn-ABERS calibration package"
+authors = ["Ivan Petej <ivan.petej@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/edpowers/venn-abers-forked.git"
+repository = "https://github.com/edpowers/venn-abers-forked.git"
+keywords = ["Probabilistic classification", "calibration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+packages = [
+    { include = "src"}
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "*"
+scikit-learn = "*"
+catboost = "*"
+mlflow = "*"
+sktime = "*"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
